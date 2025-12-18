@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SEO Guest Post Analyzer</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      font-size: 14px;
+    }
+
+    th {
+      background: #f4f4f4;
+      cursor: pointer;
+    }
+
+    .GOOD { background: #c8f7c5; }
+    .OKAY { background: #fff3b0; }
+    .REJECTED { background: #f8d7da; }
+
+    .controls {
+      margin-top: 10px;
+    }
+
+    .controls > * {
+      margin-right: 8px;
+    }
+
+    progress {
+      width: 300px;
+      height: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>SEO Guest Post Analyzer</h2>
+
+<form id="uploadForm">
+  <input type="file" id="fileInput" accept=".csv,.xlsx" required>
+  <button type="submit">Analyze</button>
+  <button type="button" id="downloadBtn" disabled>Download GOOD + OKAY CSV</button>
+</form>
+
+<div style="margin-top:10px;">
+  Progress:
+  <span id="progressText">0%</span><br>
+  <progress id="progressBar" value="0" max="100"></progress>
+</div>
+
+<div class="controls" hidden id="filterBox">
+  <input type="text" id="searchBox" placeholder="Search URL">
+  <select id="filterSelect">
+    <option value="ALL">All</option>
+    <option value="GOOD">GOOD</option>
+    <option value="OKAY">OKAY</option>
+    <option value="REJECTED">REJECTED</option>
+  </select>
+</div>
+
+<table id="resultsTable" hidden>
+  <thead>
+    <tr>
+      <th>URL</th>
+      <th>Verdict</th>
+      <th>Confidence</th>
+      <th>Outreach</th>
+      <th>Reason</th>
+      <th>Link Type</th>
+      <th>SEO Value</th>
+
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const form = document.getElementById("uploadForm");
+const fileInput = document.getElementById("fileInput");
+const progressBar = document.getElementById("progressBar");
+const progressText = document.getElementById("progressText");
+const table = document.getElementById("resultsTable");
+const tbody = table.querySelector("tbody");
+const downloadBtn = document.getElementById("downloadBtn");
+const filterBox = document.getElementById("filterBox");
+const searchBox = document.getElementById("searchBox");
+const filterSelect = document.getElementById("filterSelect");
+
+let poller = null;
+let allResults = [];
+
+/* ---------------- SUBMIT ---------------- */
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  if (!fileInput.files.length) return;
+
+  const fd = new FormData();
+  fd.append("file", fileInput.files[0]);
+
+  await fetch("/api/analyze", {
+    method: "POST",
+    body: fd
+  });
+
+  progressBar.value = 0;
+  progressText.textContent = "0%";
+  table.hidden = true;
+  filterBox.hidden = true;
+  downloadBtn.disabled = true;
+  tbody.innerHTML = "";
+
+  poller = setInterval(checkProgress, 1000);
+});
+
+/* ---------------- PROGRESS ---------------- */
+async function checkProgress() {
+  const res = await fetch("/api/progress");
+  const data = await res.json();
+
+  progressBar.value = data.percent;
+  progressText.textContent = data.percent + "%";
+
+  if (!data.running) {
+    clearInterval(poller);
+    loadResults();
+  }
+}
+
+/* ---------------- RESULTS ---------------- */
+async function loadResults() {
+  const res = await fetch("/api/results");
+  allResults = await res.json();
+
+  if (!allResults.length) {
+    alert("No results found");
+    return;
+  }
+
+  table.hidden = false;
+  filterBox.hidden = false;
+  downloadBtn.disabled = false;
+
+  renderResults();
+}
+
+/* ---------------- RENDER ---------------- */
+function renderResults() {
+  const q = searchBox.value.toLowerCase();
+  const f = filterSelect.value;
+
+  tbody.innerHTML = "";
+
+  allResults
+    .filter(r => {
+      if (f !== "ALL" && r.final_verdict !== f) return false;
+      return r.url.toLowerCase().includes(q);
+    })
+    .forEach(r => {
+      const tr = document.createElement("tr");
+      tr.className = r.final_verdict;
+
+      tr.innerHTML = `
+        <td>${r.url}</td>
+        <td>${r.final_verdict}</td>
+        <td>${r.confidence_score}</td>
+        <td>${r.outreach}</td>
+        <td>${r.reason}</td>
+        <td>${r.link_type}</td>
+        <td>${r.seo_value}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+}
+
+searchBox.addEventListener("input", renderResults);
+filterSelect.addEventListener("change", renderResults);
+
+/* ---------------- CSV EXPORT ---------------- */
+downloadBtn.addEventListener("click", () => {
+  window.location.href = "/api/export";
+});
+</script>
+
+</body>
+</html>
