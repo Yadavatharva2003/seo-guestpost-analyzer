@@ -1,16 +1,20 @@
-import uuid
-from redis import Redis
-from rq import Queue
-from app.workers.worker import process_domain
+import redis
+import json
 
-redis = Redis.from_url("redis://localhost:6379")
-queue = Queue("seo_tasks", connection=redis)
+redis_client = redis.Redis(host="localhost", port=6379, db=0)
+
+QUEUE_NAME = "seo_queue"
 
 
-def enqueue_urls(urls: list):
-    run_id = str(uuid.uuid4())
-
+def enqueue_urls(run_id: str, urls: list[str]):
+    """
+    Enqueue a batch of URLs for a given run_id.
+    """
     for url in urls:
-        queue.enqueue(process_domain, url, run_id)
+        job = {
+            "run_id": run_id,
+            "url": url
+        }
+        redis_client.lpush(QUEUE_NAME, json.dumps(job))
 
-    return run_id
+    return True

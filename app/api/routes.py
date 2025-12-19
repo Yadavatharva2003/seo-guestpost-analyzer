@@ -2,14 +2,17 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import csv
 import io
+import uuid
 from openpyxl import load_workbook
 
+# queue + storage + progress
 from app.queue.enqueue import enqueue_urls
 from app.storage.sqlite import fetch_results
-from app.queue.progress import *
-from app.queue.progress import set_run_progress
+from app.core.progress import set_run_progress, get_run_progress
+
 
 router = APIRouter()
+
 
 # -------------------------------
 # Helpers: CSV & Excel parsing
@@ -20,7 +23,7 @@ def extract_csv(raw: bytes):
         try:
             text = raw.decode(enc)
             break
-        except:
+        except Exception:
             continue
 
     reader = csv.reader(io.StringIO(text))
@@ -28,7 +31,7 @@ def extract_csv(raw: bytes):
 
     for row in reader:
         for cell in row:
-            if cell.strip():
+            if isinstance(cell, str) and cell.strip():
                 urls.append(cell.strip())
                 break
 
@@ -36,17 +39,23 @@ def extract_csv(raw: bytes):
 
 
 def extract_excel(raw: bytes):
-    wb = load_workbook(io.BytesIO(raw), read_only=True)
-    sheet = wb.active
-    urls = []
+    try:
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        sheet = wb.active
 
-    for row in sheet.iter_rows(values_only=True):
-        for cell in row:
-            if isinstance(cell, str) and cell.strip():
-                urls.append(cell.strip())
-                break
+        urls = []
 
-    return urls
+        for row in sheet.iter_rows(values_only=True):
+            if row and isinstance(row[0], str):
+                url = row[0].strip()
+                if url:
+                    urls.append(url)
+
+        wb.close()
+        return urls
+
+    except Exception:
+        raise HTTPException(400, "Invalid Excel file format")
 
 
 # -------------------------------
@@ -56,28 +65,36 @@ def extract_excel(raw: bytes):
 @router.post("/api/analyze")
 async def analyze(file: UploadFile = File(...)):
     raw = await file.read()
+    filename = file.filename.lower()
 
-    name = file.filename.lower()
-    if name.endswith(".csv"):
+    # handle CSV vs Excel
+    if filename.endswith(".csv"):
         urls = extract_csv(raw)
     else:
         urls = extract_excel(raw)
 
     if not urls:
-        raise HTTPException(400, "No URLs found")
+        raise HTTPException(status_code=400, detail="No valid URLs found")
 
-    run_id = enqueue_urls(urls)
+    # create run id
+    run_id = str(uuid.uuid4())
 
-    total = len(urls)
-    set_run_progress(run_id, 0, total)
+  # init progress BEFORE enqueue!
+    set_run_progress(run_id, 0, len(urls))
 
-    return {"message": "Queued", "run_id": run_id, "total": total}
+    # enqueue for worker
+    enqueue_urls(run_id, urls)
+
+    return {
+        "message": "Queued for scanning",
+        "run_id": run_id,
+        "total": len(urls),
+    }
 
 
 @router.get("/api/progress/{run_id}")
 def progress(run_id: str):
-    data = get_run_progress(run_id)
-    return data
+    return get_run_progress(run_id)
 
 
 @router.get("/api/results/{run_id}")
@@ -85,20 +102,33 @@ def results(run_id: str):
     rows = fetch_results(run_id)
 
     formatted = []
+
     for r in rows:
+        # r index reference:
+        # 0 run_id
+        # 1 url
+        # 2 niche
+        # 3 cms
+        # 4 submission
+        # 5 authority
+        # 6 spam
+        # 7 category
+        # 8 structure
+        # 9 tier
+
         formatted.append({
             "url": r[1],
             "niche": r[2],
             "cms": r[3],
             "submission_type": r[4],
-            "guest_post": bool(r[5]),
-            "spam_risk": r[6],
-            "authority_score": r[7],
-            "quality_tier": r[8],
-            "structure_group": r[9],
-            "index_status": bool(r[10]),
-            "content_length": r[11],
-            "load_time": r[12]
+            "guest_post": True if r[4] in ("direct", "email", "registration") else False,
+            "spam_risk": "High" if r[6] >= 0.8 else "Medium" if r[6] >= 0.5 else "Low",
+            "authority_score": r[5],
+            "quality_tier": r[9],
+            "structure_group": r[8],
+            "index_status": True,              # placeholder
+            "content_length": 0,               # can be added later
+            "load_time": 0,                    # optional future add
         })
 
     return JSONResponse(content=formatted)

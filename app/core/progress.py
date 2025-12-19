@@ -2,22 +2,30 @@ from threading import Lock
 
 _lock = Lock()
 
-progress_state = {
-    "total": 0,
-    "completed": 0,
-    "running": False
-}
+# track progress per run_id
+progress = {}   # { run_id: { total, completed } }
 
-def reset_progress(total: int):
-    with _lock:
-        progress_state["total"] = total
-        progress_state["completed"] = 0
-        progress_state["running"] = True
 
-def increment_progress():
+def set_run_progress(run_id: str, completed: int, total: int):
     with _lock:
-        progress_state["completed"] += 1
+        progress[run_id] = {
+            "total": total,
+            "completed": completed
+        }
 
-def finish_progress():
+
+def increment_progress(run_id: str):
     with _lock:
-        progress_state["running"] = False
+        if run_id in progress:
+            progress[run_id]["completed"] += 1
+
+
+def get_run_progress(run_id: str):
+    with _lock:
+        if run_id not in progress:
+            return {"total": 0, "completed": 0}
+
+        return {
+            "total": progress[run_id]["total"],
+            "completed": progress[run_id]["completed"]
+        }

@@ -1,84 +1,62 @@
 import sqlite3
-from threading import Lock
-from datetime import datetime
+import os
 
-DB_FILE = "seo.db"
+DB_PATH = "database.db"
 
-lock = Lock()
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS results (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        url TEXT UNIQUE,
-        niche TEXT,
-        cms TEXT,
-        submission_type TEXT,
-        guest_post INTEGER,
-        spam_risk TEXT,
-        authority_score INTEGER,
-        quality_tier TEXT,
-        structure_group TEXT,
-        index_status INTEGER,
-        content_length INTEGER,
-        load_time REAL,
-        run_id TEXT,
-        created_at TEXT
-    );
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT,
+            url TEXT,
+            niche TEXT,
+            cms TEXT,
+            submission TEXT,
+            authority REAL,
+            spam REAL,
+            category TEXT,
+            structure TEXT,
+            tier TEXT
+        );
     """)
-
     conn.commit()
     conn.close()
 
 
-def save_result(data: dict):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
+def save_result(run_id: str, result: dict):
+    init_db()  # ensure table exists
 
-    with lock:
-        c.execute("""
-            INSERT OR REPLACE INTO results (
-                url, niche, cms, submission_type, guest_post,
-                spam_risk, authority_score, quality_tier,
-                structure_group, index_status, content_length,
-                load_time, run_id, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data["url"],
-            data["niche"],
-            data["cms"],
-            data["submission_type"],
-            1 if data["guest_post"] else 0,
-            data["spam_risk"],
-            data["authority_score"],
-            data["quality_tier"],
-            data["structure_group"],
-            1 if data["index_status"] else 0,
-            data["content_length"],
-            data["load_time"],
-            data.get("run_id"),
-            datetime.utcnow().isoformat()
-        ))
-
-        conn.commit()
-
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        INSERT INTO results (
+            run_id, url, niche, cms, submission,
+            authority, spam, category, structure, tier
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        run_id,
+        result.get("url"),
+        result.get("niche"),
+        result.get("cms"),
+        result.get("submission"),
+        result.get("authority"),
+        result.get("spam"),
+        result.get("category"),
+        result.get("structure"),
+        result.get("tier"),
+    ))
+    conn.commit()
     conn.close()
 
 
-def fetch_results(run_id=None):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-
-    if run_id:
-        c.execute("SELECT * FROM results WHERE run_id = ?", (run_id,))
-    else:
-        c.execute("SELECT * FROM results")
-
-    rows = c.fetchall()
+def fetch_results(run_id):
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute(
+        "SELECT * FROM results WHERE run_id = ?", (run_id,)
+    )
+    rows = cursor.fetchall()
     conn.close()
-
     return rows

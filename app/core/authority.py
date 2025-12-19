@@ -1,58 +1,78 @@
-import ssl
-import socket
-import whois
-from datetime import datetime
+import re
+from bs4 import BeautifulSoup
 
-TOP_AUTHORITY_DOMAINS = [
-    "bbc.com", "forbes.com", "techcrunch.com", "microsoft.com",
-    "linkedin.com", "github.com", "stackoverflow.com",
-    "medium.com", "theverge.com"
+TRUSTED_TLDS = [
+    ".gov", ".edu", ".org", ".ac", ".mil"
 ]
 
-def check_domain_age(domain):
-    try:
-        w = whois.whois(domain)
-        created = w.creation_date
+SPAM_TLDS = [
+    ".xyz", ".click", ".loan", ".buzz", ".work", ".top"
+]
 
-        if isinstance(created, list):
-            created = created[0]
+KNOWN_AUTH_DOMAINS = [
+    "bbc.com", "forbes.com", "microsoft.com", "github.com",
+    "yahoo", "nytimes", "wikipedia", "medium.com"
+]
 
-        if not created:
-            return 0
 
-        years = (datetime.utcnow() - created).days / 365
-        return years
-    except:
+def compute_authority_score(url: str, html: str) -> int:
+    """
+    Very lightweight authority estimation.
+    Score range = 0–100.
+    """
+
+    if not url:
         return 0
 
+    score = 20  # baseline
 
-def ssl_valid(domain):
-    try:
-        ctx = ssl.create_default_context()
-        with socket.create_connection((domain, 443), timeout=3) as sock:
-            with ctx.wrap_socket(sock, server_hostname=domain):
-                return True
-    except:
-        return False
+    url = url.lower()
 
+    # TLD influence
+    for tld in TRUSTED_TLDS:
+        if url.endswith(tld):
+            score += 25
 
-def authority_score(domain):
-    score = 0
+    for tld in SPAM_TLDS:
+        if url.endswith(tld):
+            score -= 20
 
-    if domain in TOP_AUTHORITY_DOMAINS:
-        score += 3
+    # Known authority domain boost
+    if any(domain in url for domain in KNOWN_AUTH_DOMAINS):
+        score += 30
 
-    age = check_domain_age(domain)
-    if age > 5:
-        score += 2
-    elif age > 2:
-        score += 1
+    # Domain age heuristic via TLD + known patterns
+    if ".com" in url and len(url) > 15:
+        score += 5
 
-    if ssl_valid(domain):
-        score += 1
+    # Content based authority signals
+    if html:
+        soup = BeautifulSoup(html, "html.parser")
 
-    if score >= 4:
-        return "High"
-    elif score >= 2:
-        return "Medium"
-    return "Low"
+        word_count = len(soup.get_text(" ", strip=True).split())
+        
+        if word_count > 2000:
+            score += 15
+        elif word_count > 800:
+            score += 8
+        elif word_count < 200:
+            score -= 10
+
+        # backlink heuristic (anchor count)
+        anchors = soup.find_all("a")
+        if len(anchors) > 200:
+            score -= 5
+        elif len(anchors) > 50:
+            score += 5
+
+        # presence of structured data
+        if soup.find("script", {"type": "application/ld+json"}):
+            score += 5
+
+    # clamp score
+    if score < 0: 
+        score = 0
+    if score > 100:
+        score = 100
+
+    return score
