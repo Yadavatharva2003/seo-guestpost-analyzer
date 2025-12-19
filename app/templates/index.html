@@ -1,87 +1,57 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>SEO Guest Post Analyzer</title>
-
+  <title>SEO Off-Page Analyzer</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-    }
+    body { font-family: Arial; padding: 20px; }
+    table { width: 100%; margin-top: 15px; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 6px; }
+    th { background: #eee; }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 15px;
-    }
+    .Tier\ 1 { background: #c4f7c8; }
+    .Tier\ 2 { background: #fff8bc; }
+    .Tier\ 3 { background: #ffd5d5; }
+    .Blocked { background: #e0e0e0; }
 
-    th, td {
-      border: 1px solid #ddd;
-      padding: 8px;
-      font-size: 14px;
-    }
-
-    th {
-      background: #f4f4f4;
-      cursor: pointer;
-    }
-
-    .GOOD { background: #c8f7c5; }
-    .OKAY { background: #fff3b0; }
-    .REJECTED { background: #f8d7da; }
-
-    .controls {
-      margin-top: 10px;
-    }
-
-    .controls > * {
-      margin-right: 8px;
-    }
-
-    progress {
-      width: 300px;
-      height: 16px;
-    }
+    .controls > * { margin-right: 10px; }
   </style>
 </head>
+
 <body>
 
-<h2>SEO Guest Post Analyzer</h2>
+<h2>SEO Off-Page Analyzer</h2>
 
 <form id="uploadForm">
   <input type="file" id="fileInput" accept=".csv,.xlsx" required>
   <button type="submit">Analyze</button>
-  <button type="button" id="downloadBtn" disabled>Download GOOD + OKAY CSV</button>
 </form>
 
-<div style="margin-top:10px;">
-  Progress:
-  <span id="progressText">0%</span><br>
-  <progress id="progressBar" value="0" max="100"></progress>
+<div id="progressBox" hidden>
+  Progress: <span id="progressText"></span>
 </div>
 
 <div class="controls" hidden id="filterBox">
-  <input type="text" id="searchBox" placeholder="Search URL">
-  <select id="filterSelect">
-    <option value="ALL">All</option>
-    <option value="GOOD">GOOD</option>
-    <option value="OKAY">OKAY</option>
-    <option value="REJECTED">REJECTED</option>
-  </select>
+  <select id="f_niche"></select>
+  <select id="f_cms"></select>
+  <select id="f_tier"></select>
+  <select id="f_spam"></select>
+  <select id="f_group"></select>
 </div>
 
 <table id="resultsTable" hidden>
   <thead>
     <tr>
       <th>URL</th>
-      <th>Verdict</th>
-      <th>Confidence</th>
-      <th>Outreach</th>
-      <th>Reason</th>
-      <th>Link Type</th>
-      <th>SEO Value</th>
-
+      <th>Niche</th>
+      <th>CMS</th>
+      <th>Submission</th>
+      <th>Guest?</th>
+      <th>Spam</th>
+      <th>Authority</th>
+      <th>Tier</th>
+      <th>Group</th>
+      <th>Load Time</th>
+      <th>Length</th>
     </tr>
   </thead>
   <tbody></tbody>
@@ -90,110 +60,122 @@
 <script>
 const form = document.getElementById("uploadForm");
 const fileInput = document.getElementById("fileInput");
-const progressBar = document.getElementById("progressBar");
+const progressBox = document.getElementById("progressBox");
 const progressText = document.getElementById("progressText");
-const table = document.getElementById("resultsTable");
-const tbody = table.querySelector("tbody");
-const downloadBtn = document.getElementById("downloadBtn");
+const resultTable = document.getElementById("resultsTable");
+const tbody = resultTable.querySelector("tbody");
 const filterBox = document.getElementById("filterBox");
-const searchBox = document.getElementById("searchBox");
-const filterSelect = document.getElementById("filterSelect");
 
-let poller = null;
+const f_niche = document.getElementById("f_niche");
+const f_cms = document.getElementById("f_cms");
+const f_tier = document.getElementById("f_tier");
+const f_spam = document.getElementById("f_spam");
+const f_group = document.getElementById("f_group");
+
+let run_id = null;
 let allResults = [];
 
-/* ---------------- SUBMIT ---------------- */
+// ------------------ Upload Handler --------------------
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
-
-  if (!fileInput.files.length) return;
 
   const fd = new FormData();
   fd.append("file", fileInput.files[0]);
 
-  await fetch("/api/analyze", {
-    method: "POST",
-    body: fd
-  });
+  const res = await fetch("/api/analyze", { method: "POST", body: fd });
+  const data = await res.json();
+  run_id = data.run_id;
 
-  progressBar.value = 0;
+  progressBox.hidden = false;
   progressText.textContent = "0%";
-  table.hidden = true;
-  filterBox.hidden = true;
-  downloadBtn.disabled = true;
-  tbody.innerHTML = "";
 
-  poller = setInterval(checkProgress, 1000);
+  pollProgress();
 });
 
-/* ---------------- PROGRESS ---------------- */
-async function checkProgress() {
-  const res = await fetch("/api/progress");
+async function pollProgress() {
+  const res = await fetch(`/api/progress/${run_id}`);
   const data = await res.json();
 
-  progressBar.value = data.percent;
-  progressText.textContent = data.percent + "%";
+  const percent = Math.floor((data.completed / data.total) * 100);
+  progressText.textContent = percent + "%";
 
-  if (!data.running) {
-    clearInterval(poller);
+  if (data.completed < data.total) {
+    setTimeout(pollProgress, 1200);
+  } else {
     loadResults();
   }
 }
 
-/* ---------------- RESULTS ---------------- */
 async function loadResults() {
-  const res = await fetch("/api/results");
+  const res = await fetch(`/api/results/${run_id}`);
   allResults = await res.json();
 
-  if (!allResults.length) {
-    alert("No results found");
-    return;
-  }
-
-  table.hidden = false;
+  renderFilters();
+  renderTable();
+  resultTable.hidden = false;
   filterBox.hidden = false;
-  downloadBtn.disabled = false;
-
-  renderResults();
 }
 
-/* ---------------- RENDER ---------------- */
-function renderResults() {
-  const q = searchBox.value.toLowerCase();
-  const f = filterSelect.value;
+// ------------------ Filters -------------------------
+
+function renderFilters() {
+  renderSelect(f_niche, "niche");
+  renderSelect(f_cms, "cms");
+  renderSelect(f_tier, "quality_tier");
+  renderSelect(f_spam, "spam_risk");
+  renderSelect(f_group, "structure_group");
+}
+
+function renderSelect(el, field) {
+  const unique = [...new Set(allResults.map(r => r[field]))];
+  el.innerHTML = `<option value="ALL">${field.toUpperCase()}</option>`;
+  unique.forEach(u => {
+    el.innerHTML += `<option value="${u}">${u}</option>`;
+  });
+
+  el.onchange = renderTable;
+}
+
+// ------------------ Table Render --------------------
+
+function renderTable() {
+  const n = f_niche.value;
+  const c = f_cms.value;
+  const t = f_tier.value;
+  const s = f_spam.value;
+  const g = f_group.value;
 
   tbody.innerHTML = "";
 
   allResults
-    .filter(r => {
-      if (f !== "ALL" && r.final_verdict !== f) return false;
-      return r.url.toLowerCase().includes(q);
-    })
+    .filter(r =>
+      (n === "ALL" || r.niche === n) &&
+      (c === "ALL" || r.cms === c) &&
+      (t === "ALL" || r.quality_tier === t) &&
+      (s === "ALL" || r.spam_risk === s) &&
+      (g === "ALL" || r.structure_group === g)
+    )
     .forEach(r => {
       const tr = document.createElement("tr");
-      tr.className = r.final_verdict;
+      tr.className = r.quality_tier;
 
       tr.innerHTML = `
         <td>${r.url}</td>
-        <td>${r.final_verdict}</td>
-        <td>${r.confidence_score}</td>
-        <td>${r.outreach}</td>
-        <td>${r.reason}</td>
-        <td>${r.link_type}</td>
-        <td>${r.seo_value}</td>
+        <td>${r.niche}</td>
+        <td>${r.cms}</td>
+        <td>${r.submission_type}</td>
+        <td>${r.guest_post ? "Yes" : "No"}</td>
+        <td>${r.spam_risk}</td>
+        <td>${r.authority_score}</td>
+        <td>${r.quality_tier}</td>
+        <td>${r.structure_group}</td>
+        <td>${r.load_time.toFixed(2)}s</td>
+        <td>${r.content_length}</td>
       `;
 
       tbody.appendChild(tr);
     });
 }
-
-searchBox.addEventListener("input", renderResults);
-filterSelect.addEventListener("change", renderResults);
-
-/* ---------------- CSV EXPORT ---------------- */
-downloadBtn.addEventListener("click", () => {
-  window.location.href = "/api/export";
-});
 </script>
 
 </body>

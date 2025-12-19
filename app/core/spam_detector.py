@@ -1,20 +1,18 @@
-# app/core/spam_detector.py
+def detect_spam(html: str) -> str:
+    text = html.lower()
 
-SPAM_KEYWORDS = [
-    "casino", "betting", "poker",
-    "loan", "payday",
-    "viagra", "cialis", "pills",
-    "adult", "porn", "sex",
-    "crypto scam", "binary option"
-]
+    spam_keywords = [
+        "casino", "bet", "gambling",
+        "porn", "xxx", "viagra",
+        "loan", "fast cash"
+    ]
 
+    hit = any(word in text for word in spam_keywords)
 
-def detect_spam(text: str) -> bool:
-    """
-    Detect common spam / link-farm keywords
-    """
-    if not text:
-        return False
+    if hit:
+        return "High"
 
-    text = text.lower()
-    return any(keyword in text for keyword in SPAM_KEYWORDS)
+    if text.count("href=") > 200:   # too many outbound links
+        return "Medium"
+
+    return "Low"
