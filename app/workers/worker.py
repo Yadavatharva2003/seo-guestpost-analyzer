@@ -143,37 +143,32 @@ def process_domain(page, url: str, run_id: str):
 # --------------------------
 # Worker Loop
 # --------------------------
+
 def worker_loop():
     print("Worker started & listening...")
 
-    # ensure DB exists
-    init_db()
+    while True:
+        job = redis_client.blpop(QUEUE_NAME, timeout=5)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.set_default_timeout(10000)
+        if not job:
+            # no jobs → wait & continue
+            time.sleep(1)
+            continue
 
-        while True:
-            job = redis_client.brpop(QUEUE_NAME, timeout=3)
+        _, payload = job
 
-            if not job:
-                time.sleep(0.5)
-                continue
+        try:
+            data = json.loads(payload)
+            url = data["url"]
+            run_id = data["run_id"]
 
-            _, payload = job
-            try:
-                data = json.loads(payload)
-                url = data["url"]
-                run_id = data["run_id"]
+            process_domain(url, run_id)
 
-                print(f"[PROCESSING] {url}")
+            increment_progress(run_id)
 
-                process_domain(page, url, run_id)
-
-            except Exception:
-                traceback.print_exc()
-                continue
+        except Exception as e:
+            print("[ERROR] Job failed:", e)
+            continue
 
 
 if __name__ == "__main__":

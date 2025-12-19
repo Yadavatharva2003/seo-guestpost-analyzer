@@ -80,16 +80,19 @@ async def analyze(file: UploadFile = File(...)):
     run_id = str(uuid.uuid4())
 
   # init progress BEFORE enqueue!
-    set_run_progress(run_id, 0, len(urls))
+    # BEFORE enqueue
+    total = enqueue_urls(run_id, urls)
 
-    # enqueue for worker
-    enqueue_urls(run_id, urls)
+    if total == 0:
+        return {"error": "No valid URLs"}
 
-    return {
-        "message": "Queued for scanning",
-        "run_id": run_id,
-        "total": len(urls),
-    }
+    # Initialize progress BEFORE worker starts
+    set_run_progress(run_id, processed=0, total=total)
+
+    return {"run_id": run_id, "total": total}
+
+
+    
 
 
 @router.get("/api/progress/{run_id}")
